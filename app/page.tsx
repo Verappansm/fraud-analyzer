@@ -1,65 +1,199 @@
-import Image from "next/image";
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import AnalysisCard from "@/components/AnalysisCard";
+import HistoryPanel from "@/components/HistoryPanel";
+import LoadingSpinner from "@/components/LoadingSpinner";
+import NewsCard from "@/components/NewsCard";
+import RiskScoreCard from "@/components/RiskScoreCard";
+import SearchBar from "@/components/SearchBar";
+import SentimentChart from "@/components/SentimentChart";
+import WhyScoreSection from "@/components/WhyScoreSection";
+import type { AnalyzeResponse, HistoryItem } from "@/types";
+
+type StreamChunk =
+  | { type: "status"; message?: string }
+  | { type: "result"; payload: AnalyzeResponse }
+  | { type: "error"; message?: string };
+
+async function parseNdjsonStream(
+  response: Response,
+  onStatus: (message: string) => void,
+): Promise<AnalyzeResponse> {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error("Unable to read streaming response.");
+  }
+
+  const decoder = new TextDecoder();
+  let buffered = "";
+  let finalPayload: AnalyzeResponse | null = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    buffered += decoder.decode(value, { stream: true });
+    const lines = buffered.split("\n");
+    buffered = lines.pop() ?? "";
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        continue;
+      }
+
+      const event = JSON.parse(trimmed) as StreamChunk;
+      if (event.type === "status" && event.message) {
+        onStatus(event.message);
+      }
+      if (event.type === "error") {
+        throw new Error(event.message ?? "Streaming analysis failed.");
+      }
+      if (event.type === "result") {
+        finalPayload = event.payload;
+      }
+    }
+  }
+
+  if (!finalPayload) {
+    throw new Error("No result payload was returned.");
+  }
+
+  return finalPayload;
+}
 
 export default function Home() {
+  const [company, setCompany] = useState("");
+  const [result, setResult] = useState<AnalyzeResponse | null>(null);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [statusLog, setStatusLog] = useState<string[]>([]);
+
+  useEffect(() => {
+    fetch("/api/analyze")
+      .then((res) => res.json())
+      .then((payload) => {
+        setHistory(Array.isArray(payload.history) ? payload.history : []);
+      })
+      .catch(() => {
+        setHistory([]);
+      });
+  }, []);
+
+  const sentimentSummary = useMemo(() => {
+    if (!result) {
+      return "";
+    }
+    return `${result.news.length} articles analyzed • sentiment trend: ${result.sentimentTrend}`;
+  }, [result]);
+
+  async function runAnalysis() {
+    if (!company.trim() || isLoading) {
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+    setStatusLog(["Submitting analysis request..."]);
+
+    try {
+      const response = await fetch("/api/analyze", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ company: company.trim(), stream: true }),
+      });
+
+      if (!response.ok) {
+        const maybeJson = (await response.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        throw new Error(maybeJson?.error ?? "Analysis request failed.");
+      }
+
+      const parsed = await parseNdjsonStream(response, (message) => {
+        setStatusLog((prev) => [...prev, message]);
+      });
+
+      setResult(parsed);
+
+      const historyRes = await fetch("/api/analyze");
+      const historyPayload = (await historyRes.json()) as { history?: HistoryItem[] };
+      setHistory(Array.isArray(historyPayload.history) ? historyPayload.history : []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unexpected error.");
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+    <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-4 py-8 sm:px-6 lg:px-8">
+      <header className="rounded-2xl border border-cyan-100 bg-linear-to-r from-cyan-800 via-sky-800 to-blue-900 p-6 text-white shadow-xl">
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-100">Fraud Analyzer</p>
+        <h1 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">AI Financial Risk Analysis</h1>
+        <p className="mt-2 max-w-2xl text-sm text-cyan-50 sm:text-base">
+          Enterprise-grade company risk scoring from real-time news, filings, and financial indicators.
+        </p>
+      </header>
+
+      <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
+        <section className="space-y-6">
+          <SearchBar value={company} onChange={setCompany} onSubmit={runAnalysis} isLoading={isLoading} />
+
+          {isLoading && (
+            <div className="space-y-3">
+              <LoadingSpinner />
+              <div className="rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-600">
+                {statusLog.map((entry, idx) => (
+                  <p key={`${entry}-${idx}`}>• {entry}</p>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {error && <p className="rounded-xl bg-rose-100 px-4 py-3 text-sm font-medium text-rose-800">{error}</p>}
+
+          {result && (
+            <>
+              <div className="grid gap-4 md:grid-cols-2">
+                <RiskScoreCard score={result.riskScore} />
+                <AnalysisCard result={result} />
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <NewsCard news={result.news} />
+                <SentimentChart news={result.news} />
+              </div>
+
+              <WhyScoreSection whyScore={result.whyScore} />
+
+              <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Data Quality</h2>
+                <p className="mt-2 text-sm text-slate-700">
+                  {sentimentSummary}
+                  {result.cached ? " • served from cache" : " • fresh analysis"}
+                </p>
+                <p className="mt-1 text-xs text-slate-500">Analyzed at {new Date(result.analyzedAt).toLocaleString()}</p>
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="mt-3 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700"
+                >
+                  Export as PDF
+                </button>
+              </section>
+            </>
+          )}
+        </section>
+
+        <HistoryPanel history={history} />
+      </div>
+    </main>
   );
 }
