@@ -1,3 +1,5 @@
+"use client";
+
 interface SearchBarProps {
   value: string;
   onChange: (value: string) => void;
@@ -7,32 +9,38 @@ interface SearchBarProps {
 
 export default function SearchBar({ value, onChange, onSubmit, isLoading }: SearchBarProps) {
   return (
-    <section className="rounded-2xl border border-slate-200/80 bg-white/90 p-4 shadow-lg backdrop-blur sm:p-6">
-      <label htmlFor="company" className="mb-2 block text-sm font-semibold text-slate-700">
-        Company Name
-      </label>
+    <section className="glass-card rounded-[2rem] p-4 shadow-[0_20px_50px_rgba(0,0,0,0.5)] transition-all duration-500 hover:shadow-cyan-500/10">
       <div className="flex flex-col gap-3 sm:flex-row">
-        <input
-          id="company"
-          suppressHydrationWarning
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              onSubmit();
-            }
-          }}
-          placeholder="Tesla, Apple, Enron..."
-          className="h-12 flex-1 rounded-xl border border-slate-300 bg-slate-50 px-4 text-slate-900 outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100"
-          disabled={isLoading}
-        />
+        <div className="relative flex-1">
+          <div className="absolute left-6 top-1/2 -translate-y-1/2 text-cyan-500/50">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+          </div>
+          <input
+            id="company"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && onSubmit()}
+            placeholder="Enter UK Business Name or CRN..."
+            className="h-16 w-full rounded-2xl bg-white/5 pl-14 pr-6 text-xl font-medium text-white placeholder-slate-500 focus:bg-white/10 focus:outline-none transition-all border border-transparent focus:border-cyan-500/30"
+            disabled={isLoading}
+          />
+        </div>
         <button
           type="button"
           onClick={onSubmit}
           disabled={isLoading || !value.trim()}
-          className="h-12 rounded-xl bg-cyan-700 px-6 font-semibold text-white transition hover:bg-cyan-600 disabled:cursor-not-allowed disabled:bg-slate-400"
+          className="relative h-16 overflow-hidden rounded-2xl bg-gradient-to-r from-cyan-600 to-blue-600 px-12 text-sm font-black uppercase tracking-widest text-white transition-all hover:scale-[1.02] hover:shadow-[0_0_30px_rgba(6,182,212,0.4)] active:scale-95 disabled:grayscale disabled:opacity-50"
         >
-          {isLoading ? "Analyzing..." : "Analyze"}
+          {isLoading ? (
+            <div className="flex items-center gap-3">
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+              <span>Scanning</span>
+            </div>
+          ) : (
+            "Initiate Probe"
+          )}
         </button>
       </div>
     </section>

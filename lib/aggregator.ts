@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { scoreArticleSentiment } from "@/lib/sentimentScorer";
-import type { FilingItem, NormalizedArticle } from "@/types";
+import { SIGNAL_TAXONOMY, type SignalCode } from "@/lib/taxonomy";
+import type { DetectedSignal, FilingItem, NormalizedArticle, RawArticle } from "@/types";
 
 const RISK_KEYWORDS = [
   "fraud",
@@ -16,14 +17,6 @@ const RISK_KEYWORDS = [
   "class action",
   "fine",
 ];
-
-export interface RawArticle {
-  title?: string;
-  source?: string;
-  date?: string;
-  summary?: string;
-  url?: string;
-}
 
 function titleHash(title: string): string {
   const normalized = title.toLowerCase().replace(/\s+/g, " ").trim();
@@ -92,3 +85,72 @@ export function normalizeFilings(filings: FilingItem[]): FilingItem[] {
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, 10);
 }
+
+export function mapToSignals(
+  news: NormalizedArticle[],
+  companiesHouse: any,
+  directorAnalysis: any,
+): { signals: DetectedSignal[]; vectorRow: Record<SignalCode, number> } {
+  const signals: DetectedSignal[] = [];
+  const vectorRow: any = {};
+
+  // Initialize vector with 0s
+  Object.keys(SIGNAL_TAXONOMY).forEach((code) => {
+    vectorRow[code] = 0;
+  });
+
+  // 1. Companies House Profile Signals
+  if (companiesHouse) {
+    const status = companiesHouse.company_status;
+    if (status === "liquidation") { addSignal("L01", "Companies House", "Company is in liquidation"); }
+    if (status === "administration") { addSignal("L02", "Companies House", "Company is in administration"); }
+    if (status === "dissolved") { addSignal("L03", "Companies House", "Company is dissolved"); }
+    
+    // Check for overdue filings
+    if (companiesHouse.accounts?.overdue) { addSignal("G03", "Companies House", "Accounts filing is overdue"); }
+    if (companiesHouse.confirmation_statement?.overdue) { addSignal("G04", "Companies House", "Confirmation statement is overdue"); }
+  }
+
+  // 2. Director Analysis Signals
+  if (directorAnalysis) {
+    if (directorAnalysis.serialFailures) {
+      addSignal("G01", "Companies House", "Director linked to 4+ failed companies");
+    } else if (directorAnalysis.failedCompaniesCount >= 2) {
+      addSignal("G00", "Companies House", `Director linked to ${directorAnalysis.failedCompaniesCount} failed companies`);
+    }
+  }
+
+  // 3. News Signals (Heuristic mapping)
+  news.forEach((article) => {
+    const text = (article.title + " " + article.summary).toLowerCase();
+    if (text.includes("fraud") || text.includes("scam")) {
+      addSignal("P00", article.source, "Fraud allegation detected in news");
+    }
+    if (text.includes("hmrc") && text.includes("investigation")) {
+      addSignal("P01", article.source, "HMRC investigation mentioned in news");
+    }
+    if (text.includes("winding-up") || text.includes("petition")) {
+      addSignal("L00", article.source, "Winding-up petition mentioned in news");
+    }
+    if (text.includes("ccj") || text.includes("judgment")) {
+      addSignal("L07", article.source, "Potential CCJ or judgment mentioned in news");
+    }
+  });
+
+  function addSignal(code: SignalCode, source: string, detail: string) {
+    if (vectorRow[code] === 1) return; // Dedupe
+    vectorRow[code] = 1;
+    const def = SIGNAL_TAXONOMY[code];
+    signals.push({
+      code,
+      severity: def.severity,
+      source,
+      detail,
+      date: new Date().toISOString().split("T")[0],
+      confidence: "medium",
+    });
+  }
+
+  return { signals, vectorRow };
+}
+

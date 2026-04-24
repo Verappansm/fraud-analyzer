@@ -1,12 +1,11 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import OpenAI from "openai";
 import type {
-  FilingItem,
   FinancialSnapshot,
   LLMAnalysisOutput,
   NormalizedArticle,
 } from "@/types";
 
-const MODEL_NAME = "gemini-1.5-flash";
+const MODEL_NAME = "gpt-4o";
 
 function clampRiskScore(value: unknown): number {
   const n = Number(value);
@@ -32,40 +31,33 @@ function buildPrompt(
   company: string,
   articles: NormalizedArticle[],
   financials: FinancialSnapshot | null,
-  filings: FilingItem[],
+  signals: any[],
 ): string {
   return [
-    `You are a senior financial risk analyst at a global institution.`,
-    `Analyze the following real data about ${company}.`,
-    `Do NOT fabricate any facts. If data is missing, state uncertainty briefly in analysis bullet points.`,
+    `You are a senior credit risk analyst at American Express UK.`,
+    `Analyze the following real data about ${company} for a £100,000+ exposure account.`,
+    `Do NOT fabricate any facts. If data is missing, state uncertainty briefly.`,
+    `UK RISK SIGNALS: ${JSON.stringify(signals)}`,
     `ARTICLES: ${JSON.stringify(articles)}`,
     `FINANCIALS: ${JSON.stringify(financials)}`,
-    `FILINGS: ${JSON.stringify(filings)}`,
+    `INSTRUCTIONS:`,
+    `1. TAXONOMY: Map all findings to the signal codes provided in the UK RISK SIGNALS data.`,
+    `2. RISK NARRATIVE: The "whyScore" field MUST be EXACTLY 3 sentences:`,
+    `   - Sentence 1: Overall risk level and nature of concern.`,
+    `   - Sentence 2: Most critical signal and its implication for the AmEx account.`,
+    `   - Sentence 3: Recommended action (Monitor / Escalate / Immediate Review / No Action).`,
     `Return STRICTLY this JSON:`,
     `{
   "riskScore": <0-100>,
   "confidence": <"low"|"medium"|"high">,
   "recommendation": <"low risk"|"monitor"|"high risk">,
   "analysis": [<bullet string>, ...],
-  "whyScore": <paragraph explaining scoring>,
+  "whyScore": <3-sentence narrative string>,
   "fraudSignals": [<string>, ...],
   "legalRisks": [<string>, ...],
   "sentimentTrend": <"positive"|"neutral"|"negative">
 }`,
   ].join("\n");
-}
-
-function parseJsonResponse(text: string): Record<string, unknown> {
-  const trimmed = text.trim();
-  try {
-    return JSON.parse(trimmed) as Record<string, unknown>;
-  } catch {
-    const match = trimmed.match(/\{[\s\S]*\}/);
-    if (!match) {
-      throw new Error("LLM did not return parseable JSON.");
-    }
-    return JSON.parse(match[0]) as Record<string, unknown>;
-  }
 }
 
 function sanitizeModelOutput(raw: Record<string, unknown>): LLMAnalysisOutput {
@@ -81,39 +73,38 @@ function sanitizeModelOutput(raw: Record<string, unknown>): LLMAnalysisOutput {
     riskScore: clampRiskScore(raw.riskScore),
     confidence,
     recommendation,
-    analysis: analysis.length > 0 ? analysis : ["Insufficient risk evidence in the available data."],
-    whyScore: String(raw.whyScore ?? "The score reflects article sentiment, filing risk factors, and available financial context.").trim(),
+    analysis: analysis.length > 0 ? analysis : ["Insufficient evidence."],
+    whyScore: String(raw.whyScore ?? "").trim(),
     fraudSignals,
     legalRisks,
     sentimentTrend,
   };
 }
 
-export async function runGeminiRiskAnalysis(
+export async function runOpenAIRiskAnalysis(
   company: string,
   articles: NormalizedArticle[],
   financials: FinancialSnapshot | null,
-  filings: FilingItem[],
+  signals: any[],
 ): Promise<{ parsed: LLMAnalysisOutput; rawText: string; prompt: string }> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    throw new Error("Missing GEMINI_API_KEY");
+    throw new Error("Missing OPENAI_API_KEY");
   }
 
-  const prompt = buildPrompt(company, articles, financials, filings);
-  const client = new GoogleGenerativeAI(apiKey);
-  const model = client.getGenerativeModel({
+  const openai = new OpenAI({ apiKey });
+  const prompt = buildPrompt(company, articles, financials, signals);
+
+  const response = await openai.chat.completions.create({
     model: MODEL_NAME,
-    generationConfig: {
-      temperature: 0.2,
-      maxOutputTokens: 1000,
-      responseMimeType: "application/json",
-    },
+    messages: [{ role: "user", content: prompt }],
+    response_format: { type: "json_object" },
+    temperature: 0.2,
   });
 
-  const result = await model.generateContent(prompt);
-  const rawText = result.response.text();
-  const parsed = sanitizeModelOutput(parseJsonResponse(rawText));
+  const rawText = response.choices[0].message.content || "{}";
+  const parsedRes = JSON.parse(rawText);
+  const parsed = sanitizeModelOutput(parsedRes);
 
   return { parsed, rawText, prompt };
 }

@@ -1,12 +1,19 @@
 import { NextResponse } from "next/server";
-import { normalizeArticles, normalizeFilings } from "@/lib/aggregator";
+import { mapToSignals, normalizeArticles, normalizeFilings } from "@/lib/aggregator";
 import { getCachedAnalysis, setCachedAnalysis } from "@/lib/cache";
-import { runGeminiRiskAnalysis } from "@/lib/gemini";
+import { runOpenAIRiskAnalysis } from "@/lib/openai";
 import { connectMongo } from "@/lib/mongodb";
 import { aggregateSentiment } from "@/lib/sentimentScorer";
 import { fetchAlphaVantageOverview } from "@/lib/sources/alphaVantage";
+import {
+  fetchCompanyProfile,
+  fetchOfficers,
+  performDirectorNetworkAnalysis,
+  searchCompany,
+} from "@/lib/sources/companiesHouse";
 import { fetchGoogleNews } from "@/lib/sources/googleNewsRSS";
 import { fetchRecentFilings, resolveTickerFromSec } from "@/lib/sources/secEdgar";
+import { getHighestSeverity } from "@/lib/taxonomy";
 import Analysis from "@/models/Analysis";
 import Article from "@/models/Article";
 import Company from "@/models/Company";
@@ -78,6 +85,8 @@ async function persistAnalysis(
       legalRisks: response.legalRisks,
       sentimentTrend: response.sentimentTrend,
       sources: response.sources,
+      signals: response.signals,
+      vectorRow: response.vectorRow,
       rawLlmOutput,
       llmPrompt,
     });
@@ -93,20 +102,37 @@ async function runPipeline(
   emitStatus?.("Checking ticker and SEC identity...");
   const identity = await resolveTickerFromSec(companyName);
 
-  emitStatus?.("Fetching news, financials, and filings in parallel...");
-  const [rawNews, financials, rawFilings] = await Promise.all([
+  emitStatus?.("Fetching news, financials, and UK signals in parallel...");
+  const [rawNews, financials, ukCompany] = await Promise.all([
     fetchGoogleNews(companyName),
     fetchAlphaVantageOverview(identity.ticker),
-    fetchRecentFilings(identity.cik),
+    searchCompany(companyName),
   ]);
 
-  emitStatus?.("Normalizing, deduplicating, and ranking records...");
-  const news = normalizeArticles(rawNews).slice(0, 20);
-  const filings = normalizeFilings(rawFilings);
-  const sentiment = aggregateSentiment(news);
+  let chProfile = null;
+  let chOfficers = [];
+  let directorAnalysis = null;
 
-  emitStatus?.("Running Gemini risk analysis...");
-  const llm = await runGeminiRiskAnalysis(companyName, news.slice(0, 12), financials, filings);
+  if (ukCompany) {
+    emitStatus?.(`Found UK Company: ${ukCompany.title} (${ukCompany.company_number})`);
+    [chProfile, chOfficers] = await Promise.all([
+      fetchCompanyProfile(ukCompany.company_number),
+      fetchOfficers(ukCompany.company_number),
+    ]);
+    
+    emitStatus?.("Performing Director Network Analysis...");
+    directorAnalysis = await performDirectorNetworkAnalysis(chOfficers);
+  }
+
+  emitStatus?.("Normalizing, deduplicating, and mapping signals...");
+  const news = normalizeArticles(rawNews).slice(0, 20);
+  const filings = normalizeFilings([]); // We use UK signals instead of SEC if available
+  const sentiment = aggregateSentiment(news);
+  
+  const { signals, vectorRow } = mapToSignals(news, chProfile, directorAnalysis);
+
+  emitStatus?.("Running OpenAI risk analysis with full signal stack...");
+  const llm = await runOpenAIRiskAnalysis(companyName, news.slice(0, 12), financials, signals);
 
   const analyzedAt = new Date().toISOString();
   const response: AnalyzeResponse = {
@@ -118,6 +144,8 @@ async function runPipeline(
     fraudSignals: llm.parsed.fraudSignals,
     legalRisks: llm.parsed.legalRisks,
     sentimentTrend: llm.parsed.sentimentTrend || sentiment.trend,
+    signals,
+    vectorRow,
     sources: news.slice(0, 8).map((item) => ({
       title: item.title,
       url: item.url,

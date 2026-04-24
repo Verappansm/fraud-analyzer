@@ -29,6 +29,8 @@ const AnalysisSchema = new Schema(
       ],
       default: [],
     },
+    signals: { type: Schema.Types.Mixed, default: [] },
+    vectorRow: { type: Schema.Types.Mixed, default: {} },
     rawLlmOutput: { type: String, default: "" },
     llmPrompt: { type: String, default: "" },
   },

@@ -1,4 +1,15 @@
+import { Severity, SignalCode } from "@/lib/taxonomy";
+
 export type SentimentTag = "positive" | "neutral" | "negative";
+
+
+export interface RawArticle {
+  title?: string;
+  source?: string;
+  date?: string;
+  summary?: string;
+  url?: string;
+}
 
 export interface NormalizedArticle {
   title: string;
@@ -50,6 +61,17 @@ export interface LLMAnalysisOutput {
   fraudSignals: string[];
   legalRisks: string[];
   sentimentTrend: "positive" | "neutral" | "negative";
+  signals: DetectedSignal[];
+  vectorRow: Record<SignalCode, number>;
+}
+
+export interface DetectedSignal {
+  code: SignalCode;
+  severity: Severity;
+  source: string;
+  detail: string;
+  date: string;
+  confidence: "low" | "medium" | "high";
 }
 
 export interface AnalyzeResponse {
@@ -65,9 +87,12 @@ export interface AnalyzeResponse {
   news: NormalizedArticle[];
   financials: FinancialSnapshot | null;
   filings: FilingItem[];
+  signals: DetectedSignal[];
+  vectorRow: Record<SignalCode, number>;
   cached: boolean;
   analyzedAt: string;
 }
+
 
 export interface HistoryItem {
   id: string;

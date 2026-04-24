@@ -1,5 +1,5 @@
 import { XMLParser } from "fast-xml-parser";
-import type { RawArticle } from "@/lib/aggregator";
+import type { RawArticle } from "@/types";
 
 const parser = new XMLParser({
   ignoreAttributes: false,
