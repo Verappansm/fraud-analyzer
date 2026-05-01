@@ -20,17 +20,12 @@ const AnalysisSchema = new Schema(
       required: true,
     },
     sources: {
-      type: [
-        {
-          title: String,
-          url: String,
-          date: String,
-        },
-      ],
+      type: [{ title: String, url: String, date: String }],
       default: [],
     },
     signals: { type: Schema.Types.Mixed, default: [] },
     vectorRow: { type: Schema.Types.Mixed, default: {} },
+    agentTrace: { type: Schema.Types.Mixed, default: null },
     rawLlmOutput: { type: String, default: "" },
     llmPrompt: { type: String, default: "" },
   },

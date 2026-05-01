@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import AnalysisCard from "@/components/AnalysisCard";
 import HistoryPanel from "@/components/HistoryPanel";
 import LoadingSpinner from "@/components/LoadingSpinner";
@@ -10,7 +10,7 @@ import SearchBar from "@/components/SearchBar";
 import SentimentChart from "@/components/SentimentChart";
 import WhyScoreSection from "@/components/WhyScoreSection";
 import SignalDashboard from "@/components/SignalDashboard";
-import type { AnalyzeResponse, HistoryItem } from "@/types";
+import type { AnalyzeResponse, HistoryItem, UserFinancials } from "@/types";
 
 type StreamChunk =
   | { type: "status"; message?: string }
@@ -22,9 +22,7 @@ async function parseNdjsonStream(
   onStatus: (message: string) => void,
 ): Promise<AnalyzeResponse> {
   const reader = response.body?.getReader();
-  if (!reader) {
-    throw new Error("Unable to read streaming response.");
-  }
+  if (!reader) throw new Error("Unable to read streaming response.");
 
   const decoder = new TextDecoder();
   let buffered = "";
@@ -41,33 +39,25 @@ async function parseNdjsonStream(
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
-
       try {
         const event = JSON.parse(trimmed) as StreamChunk;
-        if (event.type === "status" && event.message) {
-          onStatus(event.message);
-        }
-        if (event.type === "error") {
-          throw new Error(event.message ?? "Streaming analysis failed.");
-        }
-        if (event.type === "result") {
-          finalPayload = event.payload;
-        }
+        if (event.type === "status" && event.message) onStatus(event.message);
+        if (event.type === "error") throw new Error(event.message ?? "Streaming analysis failed.");
+        if (event.type === "result") finalPayload = event.payload;
       } catch (e) {
         console.error("Failed to parse stream line:", trimmed, e);
       }
     }
   }
 
-  if (!finalPayload) {
-    throw new Error("No result payload was returned.");
-  }
-
+  if (!finalPayload) throw new Error("No result payload was returned.");
   return finalPayload;
 }
 
 export default function Home() {
   const [company, setCompany] = useState("");
+  const [context, setContext] = useState("");
+  const [financials, setFinancials] = useState<UserFinancials>({});
   const [result, setResult] = useState<AnalyzeResponse | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -76,10 +66,8 @@ export default function Home() {
 
   useEffect(() => {
     fetch("/api/analyze")
-      .then((res) => res.json())
-      .then((payload) => {
-        setHistory(Array.isArray(payload.history) ? payload.history : []);
-      })
+      .then(res => res.json())
+      .then(payload => setHistory(Array.isArray(payload.history) ? payload.history : []))
       .catch(() => setHistory([]));
   }, []);
 
@@ -92,10 +80,16 @@ export default function Home() {
     setStatusLog(["Establishing encrypted intelligence bridge..."]);
 
     try {
+      const body: Record<string, unknown> = { company: company.trim(), stream: true };
+      if (context.trim()) body.context = context.trim();
+
+      const hasFinancials = Object.values(financials).some(v => v !== undefined && v !== "");
+      if (hasFinancials) body.financials = financials;
+
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ company: company.trim(), stream: true }),
+        body: JSON.stringify(body),
       });
 
       if (!response.ok) {
@@ -103,8 +97,8 @@ export default function Home() {
         throw new Error(maybeJson?.error ?? "Authentication or connection failure.");
       }
 
-      const parsed = await parseNdjsonStream(response, (message) => {
-        setStatusLog((prev) => [...prev, message]);
+      const parsed = await parseNdjsonStream(response, message => {
+        setStatusLog(prev => [...prev, message]);
       });
 
       setResult(parsed);
@@ -127,19 +121,28 @@ export default function Home() {
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
             <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
           </div>
-          <p className="text-[10px] font-black uppercase tracking-[0.4em] text-cyan-400/80">AmEx Intelligence Node v2.5</p>
+          <p className="text-[10px] font-black uppercase tracking-[0.4em] text-cyan-400/80">AmEx Intelligence Node v3.0</p>
         </div>
         <h1 className="text-5xl font-black tracking-tight text-white sm:text-7xl">
           Risk <span className="italic text-transparent bg-clip-text bg-gradient-to-br from-cyan-400 via-blue-400 to-indigo-500">Forensics</span>
         </h1>
         <p className="mt-4 max-w-xl text-lg text-slate-400 leading-relaxed font-medium">
-          Automated multi-signal intelligence (L00-F04) for high-exposure UK small business underwriting.
+          Multi-agent intelligence pipeline (L00–F04) for high-exposure UK small business underwriting.
         </p>
       </header>
 
       <div className="grid gap-8 lg:grid-cols-[1fr_340px]">
         <div className="flex flex-col gap-8">
-          <SearchBar value={company} onChange={setCompany} onSubmit={runAnalysis} isLoading={isLoading} />
+          <SearchBar
+            value={company}
+            onChange={setCompany}
+            onSubmit={runAnalysis}
+            isLoading={isLoading}
+            context={context}
+            onContextChange={setContext}
+            financials={financials}
+            onFinancialsChange={setFinancials}
+          />
 
           {isLoading && (
             <div className="flex flex-col items-center gap-6 py-12">
@@ -181,8 +184,8 @@ export default function Home() {
                 <div className="flex flex-col gap-1">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Audit Metadata</p>
                   <p className="text-xs text-slate-300">
-                    ID: {Math.random().toString(36).substr(2, 9).toUpperCase()} • 
-                    {result.cached ? " CACHE HIT" : " RE-VALIDATED"} • 
+                    ID: {Math.random().toString(36).substr(2, 9).toUpperCase()} •{" "}
+                    {result.cached ? "CACHE HIT" : "RE-VALIDATED"} •{" "}
                     INGESTED: {new Date(result.analyzedAt).toLocaleString()}
                   </p>
                 </div>

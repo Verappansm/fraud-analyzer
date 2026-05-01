@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\smlak\\\\desktop\\\\fraud-analyzer\" -MaxDepth 1 -File)",
+      "Bash(Select-Object Name, FullName)"
+    ]
+  }
+}

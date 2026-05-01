@@ -2,6 +2,15 @@ import { Severity, SignalCode } from "@/lib/taxonomy";
 
 export type SentimentTag = "positive" | "neutral" | "negative";
 
+export interface UserFinancials {
+  turnover?: number;
+  netProfit?: number;
+  employees?: number;
+  incorporationYear?: number;
+  industry?: string;
+  country?: string;
+  description?: string;
+}
 
 export interface RawArticle {
   title?: string;
@@ -23,7 +32,7 @@ export interface NormalizedArticle {
 }
 
 export interface FinancialSnapshot {
-  ticker: string;
+  ticker: string | null;
   marketCap: number | null;
   pe: number | null;
   eps: number | null;
@@ -61,8 +70,6 @@ export interface LLMAnalysisOutput {
   fraudSignals: string[];
   legalRisks: string[];
   sentimentTrend: "positive" | "neutral" | "negative";
-  signals: DetectedSignal[];
-  vectorRow: Record<SignalCode, number>;
 }
 
 export interface DetectedSignal {
@@ -72,6 +79,44 @@ export interface DetectedSignal {
   detail: string;
   date: string;
   confidence: "low" | "medium" | "high";
+}
+
+export interface AgentTrace {
+  identity: {
+    industry: string;
+    sector: string;
+    jurisdiction: string;
+    businessType: string;
+    estimatedSize: string;
+    knownPublicly: boolean;
+    inherentRiskFactors: string[];
+    confidence: "low" | "medium" | "high";
+    notes: string;
+  };
+  financial: {
+    overallFinancialHealth: string;
+    keyRisks: string[];
+    mitigatingFactors: string[];
+    notes: string;
+  };
+  governance: {
+    filingCompliance: string;
+    directorConcerns: string[];
+    structureConcerns: string[];
+    notes: string;
+  };
+  regulatory: {
+    regulatoryExposureLevel: string;
+    primaryRegulators: string[];
+    complianceFlags: string[];
+    notes: string;
+  };
+  reputational: {
+    publicSentiment: string;
+    newsFlags: string[];
+    knownControversies: string[];
+    notes: string;
+  };
 }
 
 export interface AnalyzeResponse {
@@ -91,8 +136,8 @@ export interface AnalyzeResponse {
   vectorRow: Record<SignalCode, number>;
   cached: boolean;
   analyzedAt: string;
+  agentTrace?: AgentTrace;
 }
-
 
 export interface HistoryItem {
   id: string;
